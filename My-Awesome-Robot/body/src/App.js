@@ -14,29 +14,22 @@ function App() {
   const [user, setUser] = useState(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
 
-  // --- UPDATED: This hook now ONLY listens for auth changes ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
     });
-    // This cleans up the listener when the component is removed
     return () => unsubscribe();
   }, []);
 
-  // --- NEW: This hook ACTS on auth changes ---
-  // It runs whenever the 'user' state changes.
   useEffect(() => {
     if (user) {
-      // If a user logs in, fetch their history.
       fetchHistory();
     } else {
-      // If a user logs out, clear the history.
       setHistory([]);
     }
-  }, [user]); // The dependency array ensures this runs when 'user' changes.
+  }, [user]);
 
   const fetchHistory = async () => {
-    // The guard clause is still important
     if (!auth.currentUser) return;
     try {
       const token = await auth.currentUser.getIdToken();
@@ -90,6 +83,9 @@ function App() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      
+      // --- NEW: Variable to build the full text ---
+      let fullText = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -97,10 +93,21 @@ function App() {
           break; 
         }
         const chunk = decoder.decode(value);
+        fullText += chunk; // Build the full text locally
         setStreamingText((prevText) => prevText + chunk);
       }
       
-      fetchHistory();
+      // --- UPDATED: Optimistic UI update instead of re-fetching ---
+      // Create a new history item object with the data we already have
+      const newHistoryItem = {
+        id: new Date().toISOString(), // Use a temporary unique ID for the key
+        topic: topic,
+        explanation: fullText,
+        imageUrl: imgUrl,
+      };
+      // Add the new item to the top of our existing history list
+      setHistory(prevHistory => [newHistoryItem, ...prevHistory]);
+      // --- END OF FIX ---
 
     } catch (error) {
       console.error('An error occurred:', error);
