@@ -14,23 +14,32 @@ function App() {
   const [user, setUser] = useState(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
 
+  // --- UPDATED: This hook now ONLY listens for auth changes ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        fetchHistory();
-      } else {
-        setHistory([]);
-      }
     });
+    // This cleans up the listener when the component is removed
     return () => unsubscribe();
   }, []);
 
+  // --- NEW: This hook ACTS on auth changes ---
+  // It runs whenever the 'user' state changes.
+  useEffect(() => {
+    if (user) {
+      // If a user logs in, fetch their history.
+      fetchHistory();
+    } else {
+      // If a user logs out, clear the history.
+      setHistory([]);
+    }
+  }, [user]); // The dependency array ensures this runs when 'user' changes.
+
   const fetchHistory = async () => {
+    // The guard clause is still important
     if (!auth.currentUser) return;
     try {
       const token = await auth.currentUser.getIdToken();
-      // --- UPDATED URL ---
       const response = await fetch('https://mind-spark.onrender.com/api/history', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -62,7 +71,6 @@ function App() {
 
     try {
       const token = await auth.currentUser.getIdToken();
-      // --- UPDATED URL ---
       const response = await fetch('https://mind-spark.onrender.com/api/generate', {
         method: 'POST',
         headers: {
