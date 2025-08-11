@@ -1,17 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './index.css';
 import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 function App() {
   const [topic, setTopic] = useState('');
-  // --- REFACTORED: Using a single result object for stability ---
-  const [result, setResult] = useState(null);
+  const [streamingText, setStreamingText] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [isResultVisible, setIsResultVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [user, setUser] = useState(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
+
+  // --- NEW STABLE STREAMING LOGIC (START) ---
+  // useRef is like a "notepad" for our component. It can hold data without causing re-renders.
+  const textBuffer = useRef(''); // This will store the incoming text from the stream.
+  const intervalRef = useRef(null); // This will hold our timer.
+  // --- NEW STABLE STREAMING LOGIC (END) ---
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -42,8 +49,10 @@ function App() {
     }
   };
 
+  // Cleanup effect to stop the timer if the component is removed
   useEffect(() => {
     return () => {
+      clearInterval(intervalRef.current);
       speechSynthesis.cancel();
     };
   }, []);
@@ -55,9 +64,13 @@ function App() {
       return;
     }
     setIsLoading(true);
-    setResult(null);
+    setStreamingText('');
+    setImageUrl('');
+    setIsResultVisible(false);
     setIsImageLoading(true);
     speechSynthesis.cancel();
+    clearInterval(intervalRef.current); // Clear any old timers
+    textBuffer.current = ''; // Reset the notepad
 
     try {
       const token = await auth.currentUser.getIdToken();
@@ -75,32 +88,38 @@ function App() {
       }
       
       const imgUrl = response.headers.get('X-Image-Url');
-      // Set the initial result object with the image URL but empty text
-      setResult({ text: '', imageUrl: imgUrl });
+      setImageUrl(imgUrl);
+      setIsResultVisible(true);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      
-      let fullText = '';
 
+      // --- NEW STABLE STREAMING LOGIC (START) ---
+      // Start a timer that will update the screen every 50ms
+      intervalRef.current = setInterval(() => {
+        // Only update the screen if the notepad has new text
+        if (textBuffer.current.length > streamingText.length) {
+          setStreamingText(textBuffer.current);
+        }
+      }, 50);
+
+      // Read from the stream and write to the notepad (this doesn't cause re-renders)
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
+          clearInterval(intervalRef.current); // Stop the timer when the stream is done
+          setStreamingText(textBuffer.current); // Ensure the final text is displayed
           break; 
         }
-        const chunk = decoder.decode(value);
-        fullText += chunk;
-        // Update the text within the single result object
-        setResult((prevResult) => ({
-          ...prevResult,
-          text: prevResult.text + chunk,
-        }));
+        const chunk = decoder.decode(value, { stream: true });
+        textBuffer.current += chunk;
       }
+      // --- NEW STABLE STREAMING LOGIC (END) ---
       
       const newHistoryItem = {
         id: new Date().toISOString(),
         topic: topic,
-        explanation: fullText,
+        explanation: textBuffer.current,
         imageUrl: imgUrl,
       };
       setHistory(prevHistory => [newHistoryItem, ...prevHistory]);
@@ -108,6 +127,7 @@ function App() {
     } catch (error) {
       console.error('An error occurred:', error);
       setIsImageLoading(false);
+      clearInterval(intervalRef.current); // Stop timer on error
     } finally {
       setIsLoading(false);
     }
@@ -125,15 +145,15 @@ function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setResult(null);
+      setIsResultVisible(false);
     } catch (error) {
       console.error("Error signing out", error);
     }
   };
 
   const handleSpeak = () => {
-    if (result && result.text) {
-      const utterance = new SpeechSynthesisUtterance(result.text);
+    if (streamingText) {
+      const utterance = new SpeechSynthesisUtterance(streamingText);
       speechSynthesis.cancel();
       speechSynthesis.speak(utterance);
     }
@@ -144,11 +164,11 @@ function App() {
   };
 
   const handleHistoryClick = (historyItem) => {
+    clearInterval(intervalRef.current); // Stop any active stream timers
     setTopic(historyItem.topic);
-    setResult({
-      text: historyItem.explanation,
-      imageUrl: historyItem.imageUrl,
-    });
+    setStreamingText(historyItem.explanation);
+    setImageUrl(historyItem.imageUrl);
+    setIsResultVisible(true);
     setIsImageLoading(true);
     speechSynthesis.cancel();
     window.scrollTo(0, 0);
@@ -183,8 +203,7 @@ function App() {
       </header>
       {isLoading && <p className="loading">Loading, please wait...</p>}
       
-      {/* --- UPDATED: Render logic now uses the single result object --- */}
-      {result && (
+      {isResultVisible && (
         <div className="result">
           <h2>{topic}</h2>
           <div className="audio-player">
@@ -192,7 +211,7 @@ function App() {
             <button onClick={handleSpeak} className="audio-btn play-btn">Play</button>
             <button onClick={handleStopSpeak} className="audio-btn stop-btn">Stop</button>
           </div>
-          <p>{result.text}</p>
+          <p>{streamingText}</p>
           
           {isImageLoading && (
             <div className="image-placeholder">
@@ -201,7 +220,7 @@ function App() {
           )}
           
           <img 
-            src={result.imageUrl} 
+            src={imageUrl} 
             alt={isImageLoading ? '' : `AI generated visual for ${topic}`}
             onLoad={() => setIsImageLoading(false)}
             style={{ display: isImageLoading ? 'none' : 'block' }} 
