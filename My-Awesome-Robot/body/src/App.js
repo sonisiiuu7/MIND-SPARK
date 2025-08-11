@@ -12,7 +12,6 @@ function App() {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [user, setUser] = useState(null);
-  // --- NEW: State to track if the image is loading ---
   const [isImageLoading, setIsImageLoading] = useState(false);
 
   useEffect(() => {
@@ -31,7 +30,8 @@ function App() {
     if (!auth.currentUser) return;
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch('http://localhost:5001/api/history', {
+      // --- UPDATED URL ---
+      const response = await fetch('https://mind-spark.onrender.com/api/history', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -57,13 +57,13 @@ function App() {
     setStreamingText('');
     setImageUrl('');
     setIsResultVisible(false);
-    // --- NEW: Set image loading to true at the start of a new request ---
     setIsImageLoading(true);
     speechSynthesis.cancel();
 
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch('http://localhost:5001/api/generate', {
+      // --- UPDATED URL ---
+      const response = await fetch('https://mind-spark.onrender.com/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -96,7 +96,7 @@ function App() {
 
     } catch (error) {
       console.error('An error occurred:', error);
-      setIsImageLoading(false); // Make sure to turn off loading on error
+      setIsImageLoading(false);
     } finally {
       setIsLoading(false);
     }
@@ -137,7 +137,6 @@ function App() {
     setStreamingText(historyItem.explanation);
     setImageUrl(historyItem.imageUrl);
     setIsResultVisible(true);
-    // --- NEW: Also set image loading state when clicking history ---
     setIsImageLoading(true);
     speechSynthesis.cancel();
     window.scrollTo(0, 0);
@@ -182,7 +181,6 @@ function App() {
           </div>
           <p>{streamingText}</p>
           
-          {/* --- NEW: Conditional rendering for the image --- */}
           {isImageLoading && (
             <div className="image-placeholder">
               <p>🎨 Generating your image...</p>
@@ -192,9 +190,7 @@ function App() {
           <img 
             src={imageUrl} 
             alt={isImageLoading ? '' : `AI generated visual for ${topic}`}
-            // This function runs when the image successfully loads
             onLoad={() => setIsImageLoading(false)}
-            // This hides the image tag itself until it's loaded
             style={{ display: isImageLoading ? 'none' : 'block' }} 
           />
         </div>
