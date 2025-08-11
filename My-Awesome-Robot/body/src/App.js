@@ -5,9 +5,8 @@ import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from
 
 function App() {
   const [topic, setTopic] = useState('');
-  const [streamingText, setStreamingText] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  const [isResultVisible, setIsResultVisible] = useState(false);
+  // --- REFACTORED: Using a single result object for stability ---
+  const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -56,9 +55,7 @@ function App() {
       return;
     }
     setIsLoading(true);
-    setStreamingText('');
-    setImageUrl('');
-    setIsResultVisible(false);
+    setResult(null);
     setIsImageLoading(true);
     speechSynthesis.cancel();
 
@@ -78,13 +75,12 @@ function App() {
       }
       
       const imgUrl = response.headers.get('X-Image-Url');
-      setImageUrl(imgUrl);
-      setIsResultVisible(true);
+      // Set the initial result object with the image URL but empty text
+      setResult({ text: '', imageUrl: imgUrl });
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       
-      // --- NEW: Variable to build the full text ---
       let fullText = '';
 
       while (true) {
@@ -93,21 +89,21 @@ function App() {
           break; 
         }
         const chunk = decoder.decode(value);
-        fullText += chunk; // Build the full text locally
-        setStreamingText((prevText) => prevText + chunk);
+        fullText += chunk;
+        // Update the text within the single result object
+        setResult((prevResult) => ({
+          ...prevResult,
+          text: prevResult.text + chunk,
+        }));
       }
       
-      // --- UPDATED: Optimistic UI update instead of re-fetching ---
-      // Create a new history item object with the data we already have
       const newHistoryItem = {
-        id: new Date().toISOString(), // Use a temporary unique ID for the key
+        id: new Date().toISOString(),
         topic: topic,
         explanation: fullText,
         imageUrl: imgUrl,
       };
-      // Add the new item to the top of our existing history list
       setHistory(prevHistory => [newHistoryItem, ...prevHistory]);
-      // --- END OF FIX ---
 
     } catch (error) {
       console.error('An error occurred:', error);
@@ -129,15 +125,15 @@ function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setIsResultVisible(false);
+      setResult(null);
     } catch (error) {
       console.error("Error signing out", error);
     }
   };
 
   const handleSpeak = () => {
-    if (streamingText) {
-      const utterance = new SpeechSynthesisUtterance(streamingText);
+    if (result && result.text) {
+      const utterance = new SpeechSynthesisUtterance(result.text);
       speechSynthesis.cancel();
       speechSynthesis.speak(utterance);
     }
@@ -149,9 +145,10 @@ function App() {
 
   const handleHistoryClick = (historyItem) => {
     setTopic(historyItem.topic);
-    setStreamingText(historyItem.explanation);
-    setImageUrl(historyItem.imageUrl);
-    setIsResultVisible(true);
+    setResult({
+      text: historyItem.explanation,
+      imageUrl: historyItem.imageUrl,
+    });
     setIsImageLoading(true);
     speechSynthesis.cancel();
     window.scrollTo(0, 0);
@@ -186,7 +183,8 @@ function App() {
       </header>
       {isLoading && <p className="loading">Loading, please wait...</p>}
       
-      {isResultVisible && (
+      {/* --- UPDATED: Render logic now uses the single result object --- */}
+      {result && (
         <div className="result">
           <h2>{topic}</h2>
           <div className="audio-player">
@@ -194,7 +192,7 @@ function App() {
             <button onClick={handleSpeak} className="audio-btn play-btn">Play</button>
             <button onClick={handleStopSpeak} className="audio-btn stop-btn">Stop</button>
           </div>
-          <p>{streamingText}</p>
+          <p>{result.text}</p>
           
           {isImageLoading && (
             <div className="image-placeholder">
@@ -203,7 +201,7 @@ function App() {
           )}
           
           <img 
-            src={imageUrl} 
+            src={result.imageUrl} 
             alt={isImageLoading ? '' : `AI generated visual for ${topic}`}
             onLoad={() => setIsImageLoading(false)}
             style={{ display: isImageLoading ? 'none' : 'block' }} 
