@@ -1,3 +1,5 @@
+/* src/index.css */
+
 body {
     background-color: #f0f2f5;
     font-family: sans-serif;
@@ -44,6 +46,18 @@ button:disabled {
     margin-top: 20px;
 }
 
+/* New style for error messages */
+.error-message {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    text-align: center;
+}
+
 .result {
     margin-top: 30px;
     padding: 20px;
@@ -63,6 +77,14 @@ button:disabled {
     max-width: 100%;
     border-radius: 5px;
     margin-top: 20px;
+}
+
+.image-placeholder {
+    padding: 40px;
+    text-align: center;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    border: 1px dashed #dee2e6;
 }
 
 .audio-player {
@@ -146,7 +168,6 @@ button:disabled {
   margin-top: 0;
 }
 
-/* --- NEW STYLES FOR CLICKABLE HISTORY --- */
 .history-list {
   list-style-type: none;
   padding: 0;
