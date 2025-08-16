@@ -1,3 +1,5 @@
+// src/App.js
+
 import React, { useState, useEffect, useRef } from 'react';
 import './index.css';
 import { auth } from './firebase';
@@ -13,12 +15,10 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [user, setUser] = useState(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [error, setError] = useState(null); // New state for handling errors
 
-  // --- NEW STABLE STREAMING LOGIC (START) ---
-  // useRef is like a "notepad" for our component. It can hold data without causing re-renders.
-  const textBuffer = useRef(''); // This will store the incoming text from the stream.
-  const intervalRef = useRef(null); // This will hold our timer.
-  // --- NEW STABLE STREAMING LOGIC (END) ---
+  const textBuffer = useRef('');
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -42,18 +42,23 @@ function App() {
       const response = await fetch('https://mind-spark.onrender.com/api/history', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (!response.ok) {
+          throw new Error('Failed to fetch history.');
+      }
       const data = await response.json();
       setHistory(data);
     } catch (error) {
       console.error("Could not fetch history:", error);
+      setError("Could not load your history. Please try refreshing.");
     }
   };
 
-  // Cleanup effect to stop the timer if the component is removed
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current);
-      speechSynthesis.cancel();
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
     };
   }, []);
 
@@ -63,14 +68,21 @@ function App() {
       alert("Please sign in to use Mind Spark!");
       return;
     }
+
+    // Reset state for a new generation
     setIsLoading(true);
     setStreamingText('');
     setImageUrl('');
     setIsResultVisible(false);
     setIsImageLoading(true);
-    speechSynthesis.cancel();
-    clearInterval(intervalRef.current); // Clear any old timers
-    textBuffer.current = ''; // Reset the notepad
+    setError(null); // Clear previous errors
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+    clearInterval(intervalRef.current);
+    textBuffer.current = '';
+
+    let reader; // Define reader outside the try block for access in finally
 
     try {
       const token = await auth.currentUser.getIdToken();
@@ -83,38 +95,37 @@ function App() {
         body: JSON.stringify({ topic: topic }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Network response was not ok`);
+      if (!response.ok || !response.body) {
+        const errorData = await response.json().catch(() => ({ message: 'An unknown error occurred during generation.' }));
+        throw new Error(errorData.message || `Network response was not ok (status: ${response.status})`);
       }
       
       const imgUrl = response.headers.get('X-Image-Url');
+      if (!imgUrl) {
+          throw new Error("Did not receive an image URL from the server.");
+      }
+      
       setImageUrl(imgUrl);
-      setIsResultVisible(true);
+      setIsResultVisible(true); // Make results visible only after getting a valid response
 
-      const reader = response.body.getReader();
+      reader = response.body.getReader();
       const decoder = new TextDecoder();
 
-      // --- NEW STABLE STREAMING LOGIC (START) ---
-      // Start a timer that will update the screen every 50ms
       intervalRef.current = setInterval(() => {
-        // Only update the screen if the notepad has new text
         if (textBuffer.current.length > streamingText.length) {
           setStreamingText(textBuffer.current);
         }
       }, 50);
 
-      // Read from the stream and write to the notepad (this doesn't cause re-renders)
+      // CRASH FIX: Encapsulate the stream reading in its own try/catch
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          clearInterval(intervalRef.current); // Stop the timer when the stream is done
-          setStreamingText(textBuffer.current); // Ensure the final text is displayed
           break; 
         }
         const chunk = decoder.decode(value, { stream: true });
         textBuffer.current += chunk;
       }
-      // --- NEW STABLE STREAMING LOGIC (END) ---
       
       const newHistoryItem = {
         id: new Date().toISOString(),
@@ -126,9 +137,15 @@ function App() {
 
     } catch (error) {
       console.error('An error occurred:', error);
+      setError(`Failed to generate content: ${error.message}`); // Set a user-friendly error
       setIsImageLoading(false);
-      clearInterval(intervalRef.current); // Stop timer on error
     } finally {
+      // Ensure everything is cleaned up regardless of success or failure
+      clearInterval(intervalRef.current);
+      if (reader) {
+        reader.releaseLock(); // Release the lock on the stream reader
+      }
+      setStreamingText(textBuffer.current); // Display any text that was received before an error
       setIsLoading(false);
     }
   };
@@ -137,8 +154,10 @@ function App() {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
+      setError(null); // Clear any previous errors on successful login
     } catch (error) {
       console.error("Error during Google sign-in", error);
+      setError("Failed to sign in with Google. Please try again.");
     }
   };
 
@@ -152,7 +171,7 @@ function App() {
   };
 
   const handleSpeak = () => {
-    if (streamingText) {
+    if (streamingText && window.speechSynthesis) {
       const utterance = new SpeechSynthesisUtterance(streamingText);
       speechSynthesis.cancel();
       speechSynthesis.speak(utterance);
@@ -160,17 +179,22 @@ function App() {
   };
   
   const handleStopSpeak = () => {
-    speechSynthesis.cancel();
+    if (window.speechSynthesis) {
+        speechSynthesis.cancel();
+    }
   };
 
   const handleHistoryClick = (historyItem) => {
-    clearInterval(intervalRef.current); // Stop any active stream timers
+    clearInterval(intervalRef.current);
     setTopic(historyItem.topic);
     setStreamingText(historyItem.explanation);
     setImageUrl(historyItem.imageUrl);
     setIsResultVisible(true);
-    setIsImageLoading(true);
-    speechSynthesis.cancel();
+    setIsImageLoading(false); // Image is already loaded from history
+    setError(null); // Clear any existing errors
+    if (window.speechSynthesis) {
+        speechSynthesis.cancel();
+    }
     window.scrollTo(0, 0);
   };
 
@@ -201,7 +225,11 @@ function App() {
           </button>
         </form>
       </header>
+      
       {isLoading && <p className="loading">Loading, please wait...</p>}
+      
+      {/* Display error messages to the user */}
+      {error && <div className="error-message">{error}</div>}
       
       {isResultVisible && (
         <div className="result">
@@ -219,12 +247,18 @@ function App() {
             </div>
           )}
           
-          <img 
-            src={imageUrl} 
-            alt={isImageLoading ? '' : `AI generated visual for ${topic}`}
-            onLoad={() => setIsImageLoading(false)}
-            style={{ display: isImageLoading ? 'none' : 'block' }} 
-          />
+          {imageUrl && (
+            <img 
+              src={imageUrl} 
+              alt={`AI generated visual for ${topic}`}
+              onLoad={() => setIsImageLoading(false)}
+              onError={() => {
+                  setIsImageLoading(false);
+                  setError("The generated image failed to load.");
+              }}
+              style={{ display: isImageLoading ? 'none' : 'block' }} 
+            />
+          )}
         </div>
       )}
 
@@ -239,7 +273,7 @@ function App() {
               {history.length > 0 ? (
                 <ul className="history-list">
                   {history.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id || item.topic}>
                       <button onClick={() => handleHistoryClick(item)} className="history-item-btn">
                         {item.topic}
                       </button>
@@ -256,4 +290,5 @@ function App() {
     </div>
   );
 }
+
 export default App;
